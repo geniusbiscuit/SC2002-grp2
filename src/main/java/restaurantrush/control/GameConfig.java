@@ -25,9 +25,19 @@ public final class GameConfig {
     private final int requiredAverageSatisfaction;
     private final Menu menu;
     private final List<ArrivalSlot> arrivals;
+    private final boolean hostEnabled;
+    private final boolean happyHourEnabled;
 
+    // A setting without the Stage 3 extras (no Host, no Happy Hour).
     public GameConfig(int maxTurns, int tableCount, int requiredPaidCustomers, int requiredRevenueCents,
                       int requiredAverageSatisfaction, Menu menu, List<ArrivalSlot> arrivals) {
+        this(maxTurns, tableCount, requiredPaidCustomers, requiredRevenueCents, requiredAverageSatisfaction,
+                menu, arrivals, false, false);
+    }
+
+    public GameConfig(int maxTurns, int tableCount, int requiredPaidCustomers, int requiredRevenueCents,
+                      int requiredAverageSatisfaction, Menu menu, List<ArrivalSlot> arrivals,
+                      boolean hostEnabled, boolean happyHourEnabled) {
         this.maxTurns = maxTurns;
         this.tableCount = tableCount;
         this.requiredPaidCustomers = requiredPaidCustomers;
@@ -35,6 +45,8 @@ public final class GameConfig {
         this.requiredAverageSatisfaction = requiredAverageSatisfaction;
         this.menu = menu;
         this.arrivals = List.copyOf(arrivals);
+        this.hostEnabled = hostEnabled;
+        this.happyHourEnabled = happyHourEnabled;
     }
 
     // The required base setting with a mixed crowd: the second arrival is a VIP and the fourth
@@ -47,6 +59,15 @@ public final class GameConfig {
                 new ArrivalSlot(10, CriticCustomer::new),
                 new ArrivalSlot(13, RegularCustomer::new),
                 new ArrivalSlot(16, RegularCustomer::new)));
+    }
+
+    // The Stage 3 game: the mixed crowd of Stage 2 plus a Host, combos on the menu and Happy Hour.
+    // Arrival turns, tables, the other staff and the three targets are unchanged.
+    public static GameConfig fullSetting() {
+        GameConfig base = baseSetting();
+        return new GameConfig(base.maxTurns, base.tableCount, base.requiredPaidCustomers,
+                base.requiredRevenueCents, base.requiredAverageSatisfaction, Menu.withCombos(),
+                base.arrivals, true, true);
     }
 
     // The Stage 1 crowd (six Regular customers), kept so earlier behaviour can still be replayed.
@@ -86,5 +107,14 @@ public final class GameConfig {
 
     public List<ArrivalSlot> getArrivals() {
         return arrivals;
+    }
+
+    // Is there a Host who seats one extra customer per turn?
+    public boolean isHostEnabled() {
+        return hostEnabled;
+    }
+
+    public boolean isHappyHourEnabled() {
+        return happyHourEnabled;
     }
 }

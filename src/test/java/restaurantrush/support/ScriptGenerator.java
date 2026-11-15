@@ -31,6 +31,14 @@ public class ScriptGenerator {
                 GreedyManager.playToEnd(new GameController(GameConfig.baseSetting())));
         Files.write(dir.resolve("stage2-defeat.txt"), passive);
 
+        // Stage 3 game (Host + combos + Happy Hour): the manager switches Happy Hour on when the VIP is
+        // waiting to order, so the run shows the brief's example (VIP Burger during Happy Hour = $10.80).
+        Files.write(dir.resolve("stage3-victory.txt"),
+                GreedyManager.playToEnd(new GameController(GameConfig.fullSetting()),
+                        GreedyManager.WHEN_A_VIP_IS_WAITING));
+        // Passive manager again: 18 turns x 4 prompts (Happy Hour, Host, Waiter, Chef) = 72 "0" lines.
+        Files.write(dir.resolve("stage3-defeat.txt"), Collections.nCopies(72, "0"));
+
         System.out.println("Scripts written to " + dir.toAbsolutePath());
     }
 }

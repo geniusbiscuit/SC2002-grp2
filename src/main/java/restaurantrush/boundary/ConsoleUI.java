@@ -14,7 +14,9 @@ import restaurantrush.control.ActionResult;
 import restaurantrush.control.GameController;
 import restaurantrush.control.GameResult;
 import restaurantrush.control.TurnSummary;
+import restaurantrush.entity.ComboMeal;
 import restaurantrush.entity.Customer;
+import restaurantrush.entity.HappyHour;
 import restaurantrush.entity.Order;
 import restaurantrush.entity.Restaurant;
 import restaurantrush.entity.Table;
@@ -44,6 +46,7 @@ public class ConsoleUI {
                 + game.getConfig().getRequiredPaidCustomers() + " paid customers, revenue of at least "
                 + Money.format(game.getConfig().getRequiredRevenueCents()) + " and average satisfaction of at least "
                 + game.getConfig().getRequiredAverageSatisfaction() + ".");
+        showCombos();
         while (!game.isGameOver()) {
             playTurn();
         }
@@ -59,6 +62,14 @@ public class ConsoleUI {
                 + game.getConfig().getMaxTurns() + " ===========================");
         arrivals.forEach(out::println);
         showState();
+        offerHappyHour();
+        if (game.isHostEnabled()) {
+            hostPhase();
+            Restaurant r = game.getRestaurant();
+            out.println("After the Host - Waiter can: seat " + ids(r.queuedCustomers(), r.hasFreeTable())
+                    + " | take order " + ids(r.customersAwaitingOrder(), true)
+                    + " | serve " + orderIds(r.servableOrders(game.getTurn())));
+        }
         waiterPhase();
         chefPhase();
         TurnSummary summary = game.endTurn();
@@ -69,10 +80,23 @@ public class ConsoleUI {
 
     // ---- display -------------------------------------------------------------------------
 
+    private void showCombos() {
+        List<ComboMeal> combos = game.getConfig().getMenu().getCombos();
+        if (combos.isEmpty()) {
+            return;
+        }
+        out.println("Combos on the menu (two dishes, " + (100 - ComboMeal.PRICE_PERCENT) + "% off the pair):");
+        for (ComboMeal combo : combos) {
+            out.println("  " + combo.getName() + "  " + Money.format(combo.getPriceCents())
+                    + "  (" + combo.getPrepUnits() + " prep units)");
+        }
+    }
+
     private void showState() {
         Restaurant r = game.getRestaurant();
         out.println("Revenue: " + Money.format(r.getRevenueCents()) + " | Paid customers: " + r.getPaidCount()
                 + " | Average satisfaction (paid): " + formatAverage(r.getAverageSatisfaction()));
+        showHappyHourStatus();
         out.println("Waiting queue: " + (r.queuedCustomers().isEmpty() ? "empty"
                 : r.queuedCustomers().stream()
                         .map(c -> c + " (satisfaction " + c.getSatisfaction() + ")")
@@ -87,11 +111,30 @@ public class ConsoleUI {
                     c, c.getSatisfaction(), c.getState(), describeOrder(c.getOrder())));
         }
         out.println("Staff tasks available this turn:");
+        if (game.isHostEnabled()) {
+            out.println("  Host:   seat " + ids(r.queuedCustomers(), r.hasFreeTable()) + " (acts before the Waiter)");
+        }
         out.println("  Waiter: seat " + ids(r.queuedCustomers(), r.hasFreeTable())
                 + " | take order " + ids(r.customersAwaitingOrder(), true)
                 + " | serve " + orderIds(r.servableOrders(game.getTurn())));
         out.println("  Chef:   prepare " + orderIds(r.preparableOrders()));
         out.println("  Cashier: automatic (one payment per turn, oldest ready first)");
+    }
+
+    private void showHappyHourStatus() {
+        HappyHour happyHour = game.getHappyHour();
+        if (!happyHour.isEnabled()) {
+            return;
+        }
+        if (happyHour.isActive()) {
+            out.println("Happy Hour: ACTIVE - " + happyHour.getRemainingTurns() + " turn(s) remaining including this one ("
+                    + HappyHour.DISCOUNT_PERCENT + "% off new orders; waiting customers recover "
+                    + HappyHour.RECOVERY_POINTS + " satisfaction at turn start)");
+        } else if (happyHour.isAvailable()) {
+            out.println("Happy Hour: available (once per game, lasts " + HappyHour.DURATION_TURNS + " turns)");
+        } else {
+            out.println("Happy Hour: already used");
+        }
     }
 
     private String describeTable(Table t) {
@@ -153,6 +196,36 @@ public class ConsoleUI {
     }
 
     // ---- manager choices -------------------------------------------------------------------
+
+    private void offerHappyHour() {
+        if (!game.getHappyHour().isAvailable()) {
+            return;
+        }
+        out.println("Happy Hour is available (once per game; this turn and the next: "
+                + HappyHour.DISCOUNT_PERCENT + "% off new orders, waiting customers recover "
+                + HappyHour.RECOVERY_POINTS + " satisfaction at turn start).");
+        out.println("Switch it on now?  1) Yes  0) No");
+        if (readChoice("Happy Hour", Set.of(0, 1)) == 1) {
+            ActionResult result = game.activateHappyHour();
+            out.println((result.success() ? "  -> " : "  ! Not allowed: ") + result.message());
+            if (result.success()) {
+                showState();
+            }
+        }
+    }
+
+    private void hostPhase() {
+        while (true) {
+            out.println("Host task:  1) Seat a queued customer  0) Wait");
+            ActionResult result = switch (readChoice("Host", Set.of(0, 1))) {
+                case 1 -> game.hostSeat(readInt("Customer id to seat"));
+                default -> game.hostWait();
+            };
+            if (report(result)) {
+                return;
+            }
+        }
+    }
 
     private void waiterPhase() {
         while (true) {

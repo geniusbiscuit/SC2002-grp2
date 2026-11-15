@@ -11,31 +11,24 @@ public class Waiter extends Staff {
         super("Waiter");
     }
 
-    // Seats the customer at the lowest-numbered free table.
+    // Seats the customer at the lowest-numbered free table (same rules as the Host).
     public Table seat(Customer customer, Collection<Table> tables) {
         ensureAvailable();
-        if (customer.getState() != CustomerState.WAITING_FOR_TABLE) {
-            throw new InvalidActionException("Customer #" + customer.getId()
-                    + " is not in the waiting queue (currently " + customer.getState() + ").");
-        }
-        Table free = tables.stream()
-                .filter(Table::isFree)
-                .findFirst()
-                .orElseThrow(() -> new InvalidActionException("There is no free table."));
-        customer.sitAt(free);
+        Table table = Seating.seat(customer, tables);
         markActed();
-        return free;
+        return table;
     }
 
-    // The customer chooses the dish; the bill is locked now.
-    public Order takeOrder(Customer customer, Menu menu) {
+    // The customer chooses the dish; the bill is locked now: the customer's own price first (for
+    // example the VIP discount), then Happy Hour if it is active.
+    public Order takeOrder(Customer customer, Menu menu, HappyHour happyHour) {
         ensureAvailable();
         if (customer.getState() != CustomerState.SEATED) {
             throw new InvalidActionException("Customer #" + customer.getId()
                     + " is not seated waiting to order (currently " + customer.getState() + ").");
         }
         MenuItem item = customer.chooseItem(menu);
-        Order order = customer.placeOrder(item, customer.billFor(item));
+        Order order = customer.placeOrder(item, happyHour.priceFor(customer.billFor(item)));
         markActed();
         return order;
     }

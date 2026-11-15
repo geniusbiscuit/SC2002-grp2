@@ -54,6 +54,36 @@ class ScriptedRunTest {
     }
 
     @Test
+    void stage3VictoryScriptUsesHostComboAndHappyHour() throws IOException {
+        String output = runScript("scripts/stage3-victory.txt", GameConfig.fullSetting());
+        assertTrue(output.contains("\nVICTORY\n"), output);
+        assertTrue(output.contains("Combos on the menu"));
+        assertTrue(output.contains("The Host seats customer"));
+        assertTrue(output.contains("Happy Hour is ON for this turn and the next"));
+        assertTrue(output.contains("Happy Hour: ACTIVE - 2 turn(s) remaining"), "remaining duration is displayed");
+        assertTrue(output.contains("Happy Hour: ACTIVE - 1 turn(s) remaining"));
+        assertTrue(output.contains("Burger ($10.80, list price $15.00"), "VIP discount, then Happy Hour");
+        assertTrue(output.contains("Salad + Pasta ($24.30"), "the combo price");
+        assertTrue(output.contains("Happy Hour: already used"));
+    }
+
+    @Test
+    void stage3DefeatScriptLosesTheFullSetting() throws IOException {
+        String output = runScript("scripts/stage3-defeat.txt", GameConfig.fullSetting());
+        assertTrue(output.contains("\nDEFEAT\n"), output);
+        assertTrue(output.contains("Paid customers: 0"));
+    }
+
+    // Regression: with the Stage 3 code, the Stage 1 and 2 runs are word-for-word what they were.
+    @Test
+    void earlierRunsReplayIdenticallyOnTheStage3Code() throws IOException {
+        assertSameTranscript("stage1-victory", GameConfig.regularOnlySetting());
+        assertSameTranscript("stage1-defeat", GameConfig.regularOnlySetting());
+        assertSameTranscript("stage2-victory", GameConfig.baseSetting());
+        assertSameTranscript("stage2-defeat", GameConfig.baseSetting());
+    }
+
+    @Test
     void badInputIsRejectedAndAskedAgainWithoutUsingTheStaffTask() {
         // not a number, out of range, unknown customer id, then a valid Wait and Wait.
         String input = "abc\n9\n1\n42\n0\n0\n";
@@ -69,6 +99,12 @@ class ScriptedRunTest {
         assertTrue(output.contains("Your staff task was not used"));
         assertTrue(output.contains("The Waiter waits."));
         assertEquals(2, game.getTurn());
+    }
+
+    private static void assertSameTranscript(String run, GameConfig config) throws IOException {
+        String expected = Files.readString(Path.of("docs/runs/" + run + "-transcript.txt"));
+        String actual = runScript("scripts/" + run + ".txt", config);
+        assertEquals(expected.stripTrailing(), actual.stripTrailing(), run + " transcript changed");
     }
 
     private static String runScript(String scriptFile, GameConfig config) throws IOException {

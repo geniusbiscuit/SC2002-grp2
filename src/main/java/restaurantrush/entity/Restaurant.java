@@ -15,12 +15,15 @@ public class Restaurant {
     private final Menu menu;
     private final List<Table> tables = new ArrayList<>();
     private final List<Customer> customers = new ArrayList<>();
+    private final Host host = new Host();
     private final Waiter waiter = new Waiter();
     private final Chef chef = new Chef();
     private final Cashier cashier = new Cashier();
+    private final HappyHour happyHour;
 
-    public Restaurant(Menu menu, int tableCount) {
+    public Restaurant(Menu menu, int tableCount, boolean happyHourEnabled) {
         this.menu = menu;
+        this.happyHour = new HappyHour(happyHourEnabled);
         for (int i = 1; i <= tableCount; i++) {
             tables.add(new Table(i));
         }
@@ -34,6 +37,14 @@ public class Restaurant {
 
     public List<Table> getTables() {
         return Collections.unmodifiableList(tables);
+    }
+
+    public Host getHost() {
+        return host;
+    }
+
+    public HappyHour getHappyHour() {
+        return happyHour;
     }
 
     public Waiter getWaiter() {
@@ -102,9 +113,21 @@ public class Restaurant {
     // ---- turn mechanics ---------------------------------------------------------------
 
     public void startStaffTurn() {
+        host.startTurn();
         waiter.startTurn();
         chef.startTurn();
         cashier.startTurn();
+    }
+
+    // Happy Hour, at turn start: customers still waiting for a table or food regain satisfaction.
+    public List<Customer> applyHappyHourRecovery() {
+        List<Customer> recovered = new ArrayList<>();
+        for (Customer customer : customers) {
+            if (customer.recoverSatisfaction(HappyHour.RECOVERY_POINTS)) {
+                recovered.add(customer);
+            }
+        }
+        return recovered;
     }
 
     // Step 4a: the Cashier handles at most one customer who was ready before this turn.

@@ -1,5 +1,6 @@
 package restaurantrush.entity;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
@@ -7,10 +8,19 @@ import java.util.List;
 // what a customer orders (customers choose their own food; the manager never does).
 public class Menu {
 
+    // With combos on the menu, every third customer (ids 3, 6, ...) orders a combo.
+    public static final int COMBO_EVERY = 3;
+
     private final List<MenuItem> items;
+    private final List<ComboMeal> combos;
 
     public Menu(List<MenuItem> items) {
+        this(items, List.of());
+    }
+
+    public Menu(List<MenuItem> items, List<ComboMeal> combos) {
         this.items = List.copyOf(items);
+        this.combos = List.copyOf(combos);
     }
 
     // The three dishes of the required base setting.
@@ -21,20 +31,46 @@ public class Menu {
                 new MenuItem("Pasta", 1800, 2)));
     }
 
+    // The classic menu plus two combos: Salad + Pasta ($24.30, 3 units) and Burger + Pasta ($29.70, 3 units).
+    public static Menu withCombos() {
+        Menu classic = classic();
+        MenuItem salad = classic.items.get(0);
+        MenuItem burger = classic.items.get(1);
+        MenuItem pasta = classic.items.get(2);
+        return new Menu(classic.items, List.of(new ComboMeal(salad, pasta), new ComboMeal(burger, pasta)));
+    }
+
+    // The single dishes (without combos).
     public List<MenuItem> getItems() {
         return items;
     }
 
+    public List<ComboMeal> getCombos() {
+        return combos;
+    }
+
+    // Every dish a customer could order: single dishes first, then combos.
+    public List<MenuItem> getAllDishes() {
+        List<MenuItem> all = new ArrayList<>(items);
+        all.addAll(combos);
+        return all;
+    }
+
     // Default ordering rule (deterministic, so every run is reproducible):
-    // the n-th customer to arrive orders dish ((n - 1) mod number-of-dishes), i.e. customer 1
-    // Salad, 2 Burger, 3 Pasta, 4 Salad, 5 Burger, 6 Pasta.
+    // - without combos, the n-th customer to arrive orders single dish ((n - 1) mod number-of-dishes),
+    //   i.e. customer 1 Salad, 2 Burger, 3 Pasta, 4 Salad, 5 Burger, 6 Pasta;
+    // - with combos on the menu, customers whose id is a multiple of 3 order a combo instead
+    //   (customer 3 the first combo, customer 6 the second); everyone else follows the rule above.
     public MenuItem defaultChoiceFor(int customerId) {
+        if (!combos.isEmpty() && customerId % COMBO_EVERY == 0) {
+            return combos.get((customerId / COMBO_EVERY - 1) % combos.size());
+        }
         return items.get((customerId - 1) % items.size());
     }
 
-    // The dish with the highest price (what a critic orders).
+    // The dish with the highest price on the whole menu, combos included (what a critic orders).
     public MenuItem mostExpensive() {
-        return items.stream()
+        return getAllDishes().stream()
                 .max(Comparator.comparingInt(MenuItem::getPriceCents))
                 .orElseThrow();
     }

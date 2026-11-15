@@ -134,6 +134,15 @@ public abstract class Customer {
         }
     }
 
+    // Happy Hour: customers still waiting for a table or food regain satisfaction (maximum 100).
+    boolean recoverSatisfaction(int points) {
+        if (!state.isUnserved()) {
+            return false;
+        }
+        satisfaction = Math.min(START_SATISFACTION, satisfaction + points);
+        return true;
+    }
+
     boolean hasLostPatience() {
         return state.isInRestaurant() && satisfaction == 0;
     }

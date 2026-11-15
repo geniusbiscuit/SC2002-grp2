@@ -6,6 +6,7 @@ import java.util.function.Supplier;
 
 import restaurantrush.control.GameResult.Outcome;
 import restaurantrush.entity.Customer;
+import restaurantrush.entity.HappyHour;
 import restaurantrush.entity.InvalidActionException;
 import restaurantrush.entity.Order;
 import restaurantrush.entity.Payment;
@@ -14,16 +15,17 @@ import restaurantrush.entity.Table;
 import restaurantrush.util.Money;
 
 // Runs the turn sequence and holds no display code. The boundary (console UI) calls these
-// methods in order: beginTurn(), one Waiter action, one Chef action, endTurn().
+// methods in order: beginTurn(), optionally activateHappyHour(), one Host action
+// (if there is a Host), one Waiter action, one Chef action, endTurn().
 //
 // Steps of a turn: 1 arrivals (beginTurn), 2 manager choices and 3 kitchen and serving
-// (Waiter first, then Chef, so a dish finished this turn cannot be served until next turn),
+// (Host, then Waiter, then Chef, so a dish finished this turn cannot be served until next turn),
 // 4 eating and payment, 5 waiting and abandonment (endTurn), 6 result (getResult()).
 public class GameController {
 
     // Where we are inside a turn. Calls made in the wrong phase are rejected, not guessed.
     public enum Phase {
-        AWAITING_TURN_START, WAITER, CHEF, READY_TO_END, FINISHED
+        AWAITING_TURN_START, HOST, WAITER, CHEF, READY_TO_END, FINISHED
     }
 
     private final GameConfig config;
@@ -31,10 +33,12 @@ public class GameController {
     private int turn = 0;
     private int nextCustomerId = 1;
     private Phase phase = Phase.AWAITING_TURN_START;
+    // True once any staff member has acted this turn (Happy Hour can only start before that).
+    private boolean choicesStarted;
 
     public GameController(GameConfig config) {
         this.config = config;
-        this.restaurant = new Restaurant(config.getMenu(), config.getTableCount());
+        this.restaurant = new Restaurant(config.getMenu(), config.getTableCount(), config.isHappyHourEnabled());
     }
 
     // ---- read-only access for the boundary ---------------------------------------------
@@ -59,14 +63,26 @@ public class GameController {
         return phase == Phase.FINISHED;
     }
 
+    public boolean isHostEnabled() {
+        return config.isHostEnabled();
+    }
+
+    public HappyHour getHappyHour() {
+        return restaurant.getHappyHour();
+    }
+
     // ---- step 1: arrivals ------------------------------------------------------------
 
-    // Starts the next turn and returns the arrival messages.
+    // Starts the next turn and returns the start-of-turn messages (Happy Hour recovery, arrivals).
     public List<String> beginTurn() {
         requirePhase(Phase.AWAITING_TURN_START);
         turn++;
+        choicesStarted = false;
         restaurant.startStaffTurn();
         List<String> arrivals = new ArrayList<>();
+        if (getHappyHour().isActive()) {
+            arrivals.add(recoverWaitingCustomers());
+        }
         for (GameConfig.ArrivalSlot slot : config.getArrivals()) {
             if (slot.turn() == turn) {
                 Customer customer = slot.factory().apply(nextCustomerId++);
@@ -75,11 +91,55 @@ public class GameController {
                         + customer.getSatisfaction() + ").");
             }
         }
-        phase = Phase.WAITER;
+        phase = config.isHostEnabled() ? Phase.HOST : Phase.WAITER;
         return arrivals;
     }
 
-    // ---- step 2/3: Waiter (acts first) --------------------------------------------------
+    // ---- Happy Hour (Stage 3): only at the very start of a turn ---------------------------
+
+    // Switches Happy Hour on for this turn and the next. Allowed once per game, and only before any
+    // staff member has acted this turn. Waiting customers recover satisfaction immediately.
+    public ActionResult activateHappyHour() {
+        if ((phase != Phase.HOST && phase != Phase.WAITER) || choicesStarted) {
+            return ActionResult.fail("Happy Hour can only be switched on at the start of a turn,"
+                    + " before any staff member acts.");
+        }
+        try {
+            getHappyHour().activate();
+        } catch (InvalidActionException e) {
+            return ActionResult.fail(e.getMessage());
+        }
+        return ActionResult.ok("Happy Hour is ON for this turn and the next: new orders get "
+                + HappyHour.DISCOUNT_PERCENT + "% off. " + recoverWaitingCustomers());
+    }
+
+    // Applies the Happy Hour recovery to waiting customers and returns the message describing it.
+    private String recoverWaitingCustomers() {
+        List<Customer> recovered = restaurant.applyHappyHourRecovery();
+        String who = recovered.isEmpty() ? "nobody is waiting"
+                : recovered.stream().map(Customer::toString).toList().toString();
+        return "Happy Hour (" + getHappyHour().getRemainingTurns() + " turn(s) left): waiting customers recover "
+                + HappyHour.RECOVERY_POINTS + " satisfaction (max 100) - " + who + ".";
+    }
+
+    // ---- step 2/3: Host (Stage 3, acts before the Waiter) -------------------------------------
+
+    public ActionResult hostWait() {
+        return performHost(() -> {
+            restaurant.getHost().rest();
+            return "The Host waits.";
+        });
+    }
+
+    public ActionResult hostSeat(int customerId) {
+        return performHost(() -> {
+            Customer customer = requireCustomer(customerId);
+            Table table = restaurant.getHost().seat(customer, restaurant.getTables());
+            return "The Host seats customer " + customer + " at table " + table.getNumber() + ".";
+        });
+    }
+
+    // ---- step 2/3: Waiter (after the Host, before the Chef) ------------------------------
 
     public ActionResult waiterWait() {
         return performWaiter(() -> {
@@ -99,7 +159,7 @@ public class GameController {
     public ActionResult waiterTakeOrder(int customerId) {
         return performWaiter(() -> {
             Customer customer = requireCustomer(customerId);
-            Order order = restaurant.getWaiter().takeOrder(customer, restaurant.getMenu());
+            Order order = restaurant.getWaiter().takeOrder(customer, restaurant.getMenu(), getHappyHour());
             int listPrice = order.getItem().getPriceCents();
             String price = Money.format(order.getBillCents())
                     + (order.getBillCents() < listPrice ? ", list price " + Money.format(listPrice) : "");
@@ -156,6 +216,8 @@ public class GameController {
                     + " (order cancelled, table freed).");
         }
 
+        getHappyHour().endTurn();
+
         TurnSummary summary = new TurnSummary(turn, events);
         phase = turn >= config.getMaxTurns() ? Phase.FINISHED : Phase.AWAITING_TURN_START;
         return summary;
@@ -185,12 +247,32 @@ public class GameController {
 
     // ---- helpers -----------------------------------------------------------------------------
 
+    private ActionResult performHost(Supplier<String> action) {
+        if (phase != Phase.HOST) {
+            return ActionResult.fail(config.isHostEnabled()
+                    ? "The Host has already acted this turn."
+                    : "There is no Host in this setting.");
+        }
+        try {
+            String message = action.get();
+            choicesStarted = true;
+            phase = Phase.WAITER;
+            return ActionResult.ok(message);
+        } catch (InvalidActionException e) {
+            return ActionResult.fail(e.getMessage());
+        }
+    }
+
     private ActionResult performWaiter(Supplier<String> action) {
+        if (phase == Phase.HOST) {
+            return ActionResult.fail("The Host acts before the Waiter - choose the Host's task first.");
+        }
         if (phase != Phase.WAITER) {
             return ActionResult.fail("It is not the Waiter's turn to act (phase " + phase + ").");
         }
         try {
             String message = action.get();
+            choicesStarted = true;
             phase = Phase.CHEF;
             return ActionResult.ok(message);
         } catch (InvalidActionException e) {
@@ -200,7 +282,7 @@ public class GameController {
 
     private ActionResult performChef(Supplier<String> action) {
         if (phase != Phase.CHEF) {
-            return ActionResult.fail(phase == Phase.WAITER
+            return ActionResult.fail(phase == Phase.WAITER || phase == Phase.HOST
                     ? "The Waiter acts before the Chef - choose the Waiter task first."
                     : "It is not the Chef's turn to act (phase " + phase + ").");
         }

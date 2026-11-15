@@ -3,14 +3,22 @@ package restaurantrush.boundary;
 import restaurantrush.control.GameConfig;
 import restaurantrush.control.GameController;
 
-// Entry point: starts the base-setting game on the console. Pass --regular-only to play the
-// Stage 1 crowd (six Regular customers) instead of the mixed Stage 2 crowd.
+// Entry point. With no argument it starts the Stage 3 game (mixed crowd, Host, combos, Happy Hour).
+// Earlier settings can be replayed exactly:
+// - --classic: the Stage 2 base setting (VIP and Critic, no Host, no combos, no Happy Hour)
+// - --regular-only: the Stage 1 setting (six Regular customers)
 public class Main {
 
     public static void main(String[] args) {
-        boolean regularOnly = args.length > 0 && args[0].equals("--regular-only");
-        GameController game = new GameController(
-                regularOnly ? GameConfig.regularOnlySetting() : GameConfig.baseSetting());
+        GameConfig config = GameConfig.fullSetting();
+        for (String arg : args) {
+            if (arg.equals("--classic")) {
+                config = GameConfig.baseSetting();
+            } else if (arg.equals("--regular-only")) {
+                config = GameConfig.regularOnlySetting();
+            }
+        }
+        GameController game = new GameController(config);
         // When input is piped (a scripted run) echo it so the transcript shows every choice.
         boolean scripted = System.console() == null;
         try {
